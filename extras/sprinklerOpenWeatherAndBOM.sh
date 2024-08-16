@@ -7,7 +7,7 @@
 #                          Range is 0 to 1, so 0.5 is 50%
 #  sprinklerdEnableDelay = the URL to SprinklerD
 #
-# The below are NOT valid, you MUST chaneg them to your information.
+# The below are NOT valid, you MUST change them to your information.
 openweatherAPI='85d7c81b59b3e35320a6a3fce5392cb8'
 lat='-31.9333'
 lon='115.8333'
@@ -24,7 +24,7 @@ command -v curl >/dev/null 2>&1 || { echoerr "curl is not installed.  Aborting!"
 command -v jq >/dev/null 2>&1 || { echoerr "jq is not installed.  Aborting!"; exit 1; }
 command -v bc >/dev/null 2>&1 || { echoerr "bc not installed.  Aborting!"; exit 1; }
 
-openweatherJSON=$(curl -s "https://api.openweathermap.org/data/2.5/onecall?lat="$lat"&lon="$lon"&appid="$openweatherAPI"&exclude=current,minutely,hourly,alerts")
+openweatherJSON=$(curl -s "https://api.openweathermap.org/data/3.0/onecall?lat="$lat"&lon="$lon"&appid="$openweatherAPI"&exclude=current,minutely,hourly,alerts")
 
 if [ $? -ne 0 ]; then
     echoerr "Error reading OpenWeather URL, please check!"
@@ -32,37 +32,32 @@ if [ $? -ne 0 ]; then
     exit 1;
 fi
 
-openweatherRainJSON=$(curl -s "https://api.openweathermap.org/data/2.5/weather?lat=$lat&lon=$lon&appid=$openweatherAPI")
+bomJSON=$(curl -s "https://reg.bom.gov.au/fwo/IDW60801/IDW60801.94608.json")
 
 if [ $? -ne 0 ]; then
-    echoerr "Error reading OpenWeather Rain URL, please check!"
-    echoerr "Maybe you didn't configure your API and location?"
+    echoerr "Error reading BOM URL, please check!"
     exit 1;
 fi
 
-
-# Fetch the 'rain.3h' value if it exists (default to 0 if it doesn't)
-rainMM=$(echo $openweatherRainJSON | jq '.rain["3h"] // 0')
+# Fetch the 'rain_trace' value if it exists (default to 0 if it doesn't)
+rainMM=$(echo $bomJSON | jq -r '.observations.data[0].rain_trace // "0"')
 
 # Check if 'jq' encountered an error
 if [ $? -ne 0 ]; then
-    echoerr "Error reading OpenWeather Rain JSON, please check!"
+    echoerr "Error reading BOM JSON, please check!"
     exit 1;
 fi
 
 # Convert the rain from mm to inches (1 inch = 25.4 mm)
-rainInches=$(echo "scale=4; $rainMM / 25.4" | bc)
+rainInches=$(printf "%.4f\n" $(echo "$rainMM / 25.4" | bc -l))
 
-echomsg "Rain in the last 3 hours: $rainInches inches"
+echomsg "Rain in the last 24 hours: $rainInches inches"
 
 # Prepare the URL for the request
 sprinklerdRainTotal="http://localhost/?type=sensor&sensor=raintotal&value=$rainInches"
 
 # Send the request to the server
 curl -s "$sprinklerdRainTotal" > /dev/null
-
-
-
 
 probability=$(echo $openweatherJSON | jq '.["daily"][0].pop' )
 
@@ -72,13 +67,12 @@ if [ "$probability" == "null" ]; then
     exit 1;
 fi
 
-
 echomsg -n "Probability of rain today is "`echo "$probability * 100" | bc`"%"
 
 curl -s "$sprinklerdProbability`echo \"$probability * 100\" | bc`" > /dev/null
 
 if (( $(echo "$probability > $probabilityOver" | bc -l) )); then
-  echomsg -n ", enabeling rain delay"
+  echomsg -n ", enabling rain delay"
   curl -s "$sprinklerdEnableDelay" > /dev/null
 fi
 
